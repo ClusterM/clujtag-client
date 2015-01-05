@@ -118,6 +118,11 @@ static int h_setup(struct libxsvf_host *h)
 		fflush(stderr);
 	}
 
+	if (!strlen(u->comPort))
+	{
+		fprintf(stderr, "You '-p' parameter to specify the serial port\n");
+		return -1;
+	}
 #ifdef WINDOWS
 
 	char devicePath[50];
@@ -384,7 +389,7 @@ static void help()
 	fprintf(stderr, "Usage: %s [ -v ... ] -p portname { -s svf-file | -x xsvf-file | -c }\n", progname);
 	fprintf(stderr, "\n");
 	fprintf(stderr, "   -p portname\n");
-	fprintf(stderr, "          Use then specified COM port (default is COM14)\n");
+	fprintf(stderr, "          Use specified COM port for communication with programmer (COMxx for Windows and /dev/ttyxxx for Linux)\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "   -v, -vv, -vvv, -vvvv\n");
 	fprintf(stderr, "          Verbose, more verbose and even more verbose\n");
@@ -408,7 +413,7 @@ int main(int argc, char **argv)
 	int gotaction = 0;
 	int opt;
 
-	strcpy(u.comPort, "COM14");
+	u.comPort[0] = 0;
 	u.portHandle = 0;
 
 	progname = argc >= 1 ? argv[0] : "xvsftool";

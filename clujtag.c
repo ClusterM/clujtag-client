@@ -321,7 +321,7 @@ static void h_report_tapstate(struct libxsvf_host *h)
 
 static void h_report_device(struct libxsvf_host *h, unsigned long idcode)
 {
-	printf("idcode=0x%08lx, revision=0x%01lx, part=0x%04lx, manufactor=0x%03lx\n", idcode,
+	printf("Device found: idcode=0x%08lx, revision=0x%01lx, part=0x%04lx, manufactor=0x%03lx\n", idcode,
 			(idcode >> 28) & 0xf, (idcode >> 12) & 0xffff, (idcode >> 1) & 0x7ff);
 }
 
@@ -374,7 +374,7 @@ static void copyleft()
 	static int already_printed = 0;
 	if (already_printed)
 		return;
-	fprintf(stderr, "xsvftool-clujtag\n");
+	fprintf(stderr, "clujtag\n");
 	fprintf(stderr, "Copyright (C) 2009  RIEGL Research ForschungsGmbH\n");
 	fprintf(stderr, "Copyright (C) 2009  Clifford Wolf <clifford@clifford.at>\n");
 	fprintf(stderr, "Copyright (C) 2014  Cluster <clusterrr@clusterrr.com>\n");
@@ -452,6 +452,7 @@ int main(int argc, char **argv)
 			break;
 		case 'c':
 			gotaction = 1;
+			fprintf(stderr, "Scanning JTAG chain...\n");
 			if (libxsvf_play(&h, LIBXSVF_MODE_SCAN) < 0) {
 				fprintf(stderr, "Error while scanning JTAG chain.\n");
 				rc = 1;

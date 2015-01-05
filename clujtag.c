@@ -377,7 +377,7 @@ static void copyleft()
 	fprintf(stderr, "xsvftool-clujtag\n");
 	fprintf(stderr, "Copyright (C) 2009  RIEGL Research ForschungsGmbH\n");
 	fprintf(stderr, "Copyright (C) 2009  Clifford Wolf <clifford@clifford.at>\n");
-	fprintf(stderr, "Copyright (C) 2014  Cluster <clusterrr@clusterrr.com>\n");
+	fprintf(stderr, "Copyright (C) 2015  Cluster <clusterrr@clusterrr.com>\n");
 	fprintf(stderr, "Lib(X)SVF is free software licensed under the ISC license.\n");
 	already_printed = 1;
 }

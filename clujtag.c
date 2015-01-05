@@ -381,7 +381,7 @@ static void help()
 {
 	copyleft();
 	fprintf(stderr, "\n");
-	fprintf(stderr, "Usage: %s [ -v ... ] { -s svf-file | -x xsvf-file | -c }\n", progname);
+	fprintf(stderr, "Usage: %s [ -v ... ] -p portname { -s svf-file | -x xsvf-file | -c }\n", progname);
 	fprintf(stderr, "\n");
 	fprintf(stderr, "   -p portname\n");
 	fprintf(stderr, "          Use then specified COM port (default is COM14)\n");

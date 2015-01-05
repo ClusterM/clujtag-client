@@ -389,7 +389,7 @@ static void help()
 	fprintf(stderr, "Usage: %s [ -v ... ] -p portname { -s svf-file | -x xsvf-file | -c }\n", progname);
 	fprintf(stderr, "\n");
 	fprintf(stderr, "   -p portname\n");
-	fprintf(stderr, "          Use specified COM port for communication with programmer (COMxx for Windows and /dev/ttyxxx for Linux)\n");
+	fprintf(stderr, "          Use specified serial port for communication with programmer (COMxx for Windows and /dev/ttyxxx for Linux)\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "   -v, -vv, -vvv, -vvvv\n");
 	fprintf(stderr, "          Verbose, more verbose and even more verbose\n");

@@ -297,10 +297,6 @@ static int bitdata_play(struct libxsvf_host *h, struct bitdata_s *bd, enum libxs
 	int tms = 0;
 	int i;
 
-	//printf("bitpdata_play from %d to %d\r\n", bd->len+left_padding-1, left_padding);
-	unsigned char data[250];
-	unsigned char count = 0;
-	
 	for (i=bd->len+left_padding-1; i >= left_padding; i--) {
 		if (i == left_padding && h->tap_state != estate) {
 			h->tap_state++;
@@ -314,35 +310,11 @@ static int bitdata_play(struct libxsvf_host *h, struct bitdata_s *bd, enum libxs
 		int tdo = -1;
 		if (bd->tdo_data && bd->has_tdo_data && (!bd->tdo_mask || getbit(bd->tdo_mask, i)))
 			tdo = getbit(bd->tdo_data, i);
-		//int rmask = bd->ret_mask && getbit(bd->ret_mask, i);
-		//if (LIBXSVF_HOST_PULSE_TCK(tms, tdi, tdo, rmask, 0) < 0)
-		data[count] = (tms&1);
-		if (tdi >= 0)
-		{
-			data[count] |= (1<<1);
-			data[count] |= tdi<<2;
-		}
-		if (tdo >= 0)
-		{
-			data[count] |= (1<<3);
-			data[count] |= tdo<<4;
-		}
-		count++;
-		if (count == sizeof(data))
-		{
-			if (LIBXSVF_HOST_PULSE_TCK_MULTI(data,count) < 0)
-				tdo_error = 1;
-			count = 0;
-		}
-	}
-	
-	if (count > 0)
-	{
-		if (LIBXSVF_HOST_PULSE_TCK_MULTI(data,count) < 0)
+		int rmask = bd->ret_mask && getbit(bd->ret_mask, i);
+		if (LIBXSVF_HOST_PULSE_TCK(tms, tdi, tdo, rmask, 0) < 0)
 			tdo_error = 1;
-		count = 0;
 	}
-		
+
 	if (tms)
 		LIBXSVF_HOST_REPORT_TAPSTATE();
 
@@ -404,7 +376,7 @@ int libxsvf_svf(struct libxsvf_host *h)
 			while (*p > 0 && *p >= ' ') {
 				p++;
 			}
-			/*
+/*
 			unsigned long number = 0;
 			int exp = 0;
 			p += strtokenskip(p);
@@ -431,7 +403,7 @@ int libxsvf_svf(struct libxsvf_host *h)
 				LIBXSVF_HOST_REPORT_ERROR("FREQUENCY command failed!");
 				goto error;
 			}
-			*/
+*/
 			goto eol_check;
 		}
 

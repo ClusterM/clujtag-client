@@ -193,9 +193,6 @@ static int shift_data(struct libxsvf_host *h, unsigned char *inp, unsigned char 
 		TAP(state);
 		tms = 0;
 
-		unsigned char data[250];
-		unsigned char count = 0;
-
 		for (i=len+left_padding-1; i>=left_padding; i--) {
 			if (i == left_padding && h->tap_state != estate) {
 				h->tap_state++;
@@ -205,36 +202,9 @@ static int shift_data(struct libxsvf_host *h, unsigned char *inp, unsigned char 
 			int tdo = -1;
 			if (maskp && getbit(maskp, i))
 				tdo = outp && getbit(outp, i);
-//			int sync = with_retries && i == left_padding;
-
-			data[count] = (tms&1);
-			if (tdi >= 0)
-			{
-				data[count] |= (1<<1);
-				data[count] |= tdi<<2;
-			}
-			if (tdo >= 0)
-			{
-				data[count] |= (1<<3);
-				data[count] |= tdo<<4;
-			}
-			count++;
-			if (count == sizeof(data))
-			{
-				if (LIBXSVF_HOST_PULSE_TCK_MULTI(data,count) < 0)		
+			int sync = with_retries && i == left_padding;
+			if (LIBXSVF_HOST_PULSE_TCK(tms, tdi, tdo, 0, sync) < 0)
 				tdo_error = 1;
-				count = 0;
-			}
-
-//			if (LIBXSVF_HOST_PULSE_TCK(tms, tdi, tdo, 0, sync) < 0)
-//				tdo_error = 1;
-		}
-
-		if (count > 0)
-		{
-			if (LIBXSVF_HOST_PULSE_TCK_MULTI(data,count) < 0)		
-			tdo_error = 1;
-			count = 0;
 		}
 
 		if (tms)

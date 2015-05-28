@@ -23,6 +23,7 @@
 #endif
 
 #include "libxsvf.h"
+#include "defines.h"
 #include "jtag_commands.h"
 
 #include <sys/time.h>
@@ -40,34 +41,22 @@
 #include <termios.h>
 #endif
 
+char comPort[512];
 #ifdef WINDOWS
-static void write_port(HANDLE portHandle, uint8_t data)
-{
-	DWORD writed = 0;
-	if (WriteFile(portHandle, &data, sizeof(data), &writed, NULL) && (writed == 1)) return;
-	int error = GetLastError();
-	fprintf(stderr, "Write error: %d\r\n", error);
-	exit(1);
-}
+HANDLE portHandle;
 #else
-static void write_port(int portHandle, uint8_t data)
-{
-	int res;
-	do
-	{
-	    res  = write(portHandle, &data, 1);
-	    if (res == -1) usleep(10);
-	} while (res == -1 && errno == EAGAIN);
-	if (res == -1)
-	{
-	    perror("Write error");
-	    exit(1);
-	}
-}
+int portHandle;
 #endif
+FILE *f;
+int verbose;
+int tck_count;
+unsigned char tck_data[5096];
+int write_buffer_count = 0;
+unsigned char write_buffer[ACK_STEP+16];
+int byte_counter = 0;
 
 #ifdef WINDOWS
-static uint8_t read_port(HANDLE portHandle)
+static uint8_t read_port()
 {
 	uint8_t buffer;
 	DWORD read = 0;
@@ -76,7 +65,7 @@ static uint8_t read_port(HANDLE portHandle)
 	exit(1);
 }
 #else
-static uint8_t read_port(int portHandle)
+static uint8_t read_port()
 {
 	uint8_t data;
 	int res, t = 0;
@@ -99,26 +88,67 @@ static uint8_t read_port(int portHandle)
 }
 #endif
 
-struct udata_s {
-	char comPort[512];
+void check_result()
+{
+	if (!read_port())
+	{
+		fprintf(stderr, "JTAG error\r\n");
+		exit(2);
+	}
+}
+
 #ifdef WINDOWS
-	HANDLE portHandle;
+static void flush_data()
+{
+	if (!write_buffer_count) return;
+	DWORD writed = 0;
+	if (WriteFile(portHandle, write_buffer, write_buffer_count, &writed, NULL) && (writed == write_buffer_count))
+	{
+		return;
+	}
+	int error = GetLastError();
+	fprintf(stderr, "Write error: %d\r\n", error);
+	exit(1);
+}
 #else
-	int portHandle;
+static void flush_data()
+{
+	if (!write_buffer_count) return;
+	int res;
+	do
+	{
+	    res  = write(portHandle, write_buffer, write_buffer_count);
+	    if (res == -1) usleep(10);
+	} while (res == -1 && errno == EAGAIN);
+	if (res == -1)
+	{
+	    perror("Write error");
+	    exit(1);
+	}
+}
 #endif
-	FILE *f;
-	int verbose;
-};
+
+static void write_port(uint8_t data)
+{
+	write_buffer[write_buffer_count++] = data;
+	byte_counter++;
+	if (byte_counter >= ACK_STEP)
+	{
+		flush_data();
+		write_buffer_count = 0;
+		check_result();
+		byte_counter = 0;
+	}
+}
 
 static int h_setup(struct libxsvf_host *h)
 {
-	struct udata_s *u = h->user_data;
-	if (u->verbose >= 2) {
+	if (verbose >= 2) {
 		fprintf(stderr, "[SETUP]\n");
 		fflush(stderr);
 	}
 
-	if (!strlen(u->comPort))
+	if (!strlen(comPort))
 	{
 		fprintf(stderr, "You '-p' parameter to specify the serial port\n");
 		return -1;
@@ -126,39 +156,54 @@ static int h_setup(struct libxsvf_host *h)
 #ifdef WINDOWS
 
 	char devicePath[50];
-	sprintf(devicePath, "\\\\.\\%s", u->comPort);
+	sprintf(devicePath, "\\\\.\\%s", comPort);
 
 	HANDLE mHandle = CreateFile(devicePath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,/* FILE_FLAG_OVERLAPPED*/0, NULL);
 	if (mHandle == INVALID_HANDLE_VALUE)
 	{
-		fprintf(stderr, "Can't open serial port %s\r\n", u->comPort);
+		fprintf(stderr, "Can't open serial port %s\r\n", comPort);
 		return -1;
 	}
 
 	DCB dcb;
-
 	FillMemory(&dcb, sizeof(dcb), 0);
 	if (!GetCommState(mHandle, &dcb))     // get current DCB
 	{
-	fprintf(stderr, "Can't get DCB\r\n");
-	return -1;
-	}
-	
-	dcb.BaudRate = CBR_256000;
-			
+		fprintf(stderr, "Can't get serial port settings\r\n");
+		return -1;
+	}	
+	dcb.BaudRate = CBR_256000;			
 	if (!SetCommState(mHandle, &dcb))
 	{
 		fprintf(stderr, "Can't set serial port settings\r\n");
 		return -1;
 	}
+	
+	COMMTIMEOUTS timeouts;
+	FillMemory(&timeouts, sizeof(timeouts), 0);	
+	if (!GetCommTimeouts(mHandle, &timeouts))
+	{
+		fprintf(stderr, "Can't get serial port timeouts\r\n");
+		return -1;
+	}
+	timeouts.ReadIntervalTimeout = 0;
+	timeouts.ReadTotalTimeoutMultiplier = 0;
+	timeouts.ReadTotalTimeoutMultiplier = 10000;
+	timeouts.WriteTotalTimeoutConstant = 10000;
+	timeouts.WriteTotalTimeoutMultiplier = 0;
+	if (!SetCommTimeouts(mHandle, &timeouts))
+	{
+		fprintf(stderr, "Can't set serial port timeouts\r\n");
+		return -1;
+	}
 
-	u->portHandle = mHandle;
+	portHandle = mHandle;
 
 #else
 
 	int fd;
 	struct termios options;
-	fd = open(u->comPort, O_RDWR | O_NOCTTY);
+	fd = open(comPort, O_RDWR | O_NOCTTY);
 	if (fd == -1)
 	{
 		perror("Can't open serial port");
@@ -175,160 +220,151 @@ static int h_setup(struct libxsvf_host *h)
 	cfsetospeed(&options, B230400);
 	tcsetattr(fd, TCSANOW, &options);
 	tcflush(fd, TCIFLUSH);
-	u->portHandle = fd;
+	portHandle = fd;
 	
 #endif
 
-	// Reset device
-	write_port(u->portHandle, 0xFF);
-	// Setup JTAG port
-	write_port(u->portHandle,JTAG_SETUP);
+	// Setup JTAG
+	int i;
+	byte_counter = 0;
+	for (i = 0; i < 16; i++)
+		write_port(JTAG_SETUP);
+	byte_counter = 0;
 
-  return 0;
+	return 0;
 }
 
 static int h_shutdown(struct libxsvf_host *h)
 {
-	struct udata_s *u = h->user_data;
-	if (u->verbose >= 2) {
+	if (verbose >= 2) {
 		fprintf(stderr, "[SHUTDOWN]\n");
 		fflush(stderr);
 	}
 	
-	if (u->portHandle)
+	if (portHandle)
 	{
-		write_port(u->portHandle, JTAG_SHUTDOWN);	
+		write_port(JTAG_SHUTDOWN);
+		flush_data();
+		check_result(portHandle);
 #ifdef WINDOWS
-		CloseHandle(u->portHandle);
+		CloseHandle(portHandle);
 #else
-		close(u->portHandle);
+		close(portHandle);
 #endif
 	}
 
 	return 0;
 }
 
+static int h_pulse_tck_multi(struct libxsvf_host *h, unsigned char* data, unsigned int count)
+{
+	write_port(JTAG_PULSE_TCK_MULTI);
+	write_port(count & 0xff);
+	write_port((count >> 8) & 0xff);
+	int i;
+	unsigned char r = 0;
+	int last_v = data[0];
+	for (i = 0; i < count; i++)
+	{
+		if (data[i] != last_v || r == 0x7f)
+		{
+			if (r > 0)
+			{
+				if (r > 1)
+				{
+					write_port(r);
+					write_port(last_v & 0xff);
+				} else {
+					write_port((last_v & 0xff) | 0x80);
+				}
+			}
+			r = 0;
+			last_v = data[i];
+		}
+		r++;
+	}
+	
+	if (r > 0)
+	{
+		if (r > 1)
+		{
+			write_port(r);
+			write_port(last_v & 0xff);
+		} else {
+			write_port((last_v & 0xff) | 0x80);
+		}
+	}
+			
+	if (verbose >= 4) {
+		fprintf(stderr, "[MULTI TCK: %d bits]\n", count);
+		fprintf(stderr, "[TMS:%d, TDI:%d, TDO:%d]\n", data[i]&1, (data[i]>>1)&1 ? (data[i]>>2)&1 : -1, (data[i]>>3)&1 ? (data[i]>>4)&1 : -1);
+	}
+	return 0;
+}
+
+static void flush_tck(struct libxsvf_host *h)
+{
+	if (tck_count > 0)
+		h_pulse_tck_multi(h, tck_data, tck_count);
+	tck_count = 0;
+}
+
 static void h_udelay(struct libxsvf_host *h, long usecs, int tms, long num_tck)
 {
-	struct udata_s *u = h->user_data;
-	if (u->verbose >= 3) {
+	flush_tck(h);
+	if (verbose >= 3) {
 		fprintf(stderr, "[DELAY:%ld, TMS:%d, NUM_TCK:%ld]\n", usecs, tms, num_tck);
 		fflush(stderr);
 	}
-	if (num_tck > 0) {
-		struct timeval tv1, tv2;
-		gettimeofday(&tv1, NULL);
-		write_port(u->portHandle, JTAG_PULSE_TCK_DELAY);
-		write_port(u->portHandle, tms);
-		write_port(u->portHandle, num_tck);
 
-		gettimeofday(&tv2, NULL);
-		if (tv2.tv_sec > tv1.tv_sec) {
-			usecs -= (1000000 - tv1.tv_usec) + (tv2.tv_sec - tv1.tv_sec - 1) * 1000000;
-			tv1.tv_usec = 0;
-		}
-		usecs -= tv2.tv_usec - tv1.tv_usec;
-		if (u->verbose >= 3) {
-			fprintf(stderr, "[DELAY_AFTER_TCK:%ld]\n", usecs > 0 ? usecs : 0);
-			fflush(stderr);
-		}
+	write_port(JTAG_PULSE_TCK_DELAY);
+	write_port((tms&1) | ((num_tck > 0) ? 0b10 : 0) | ((usecs > 0) ? 0b100 : 0));
+	if (num_tck > 0)
+	{
+		write_port(num_tck & 0xff);
+		write_port((num_tck >> 8) & 0xff);
+		write_port((num_tck >> 16) & 0xff);
+		write_port((num_tck >> 24) & 0xff);
 	}
-	if (usecs > 0) {
-		usleep(usecs);
+//	if (num_tck > 0) printf("%d\n", num_tck);
+		
+	if (usecs > 0)
+	{
+		write_port(usecs & 0xff);
+		write_port((usecs >> 8) & 0xff);
+		write_port((usecs >> 16) & 0xff);
+		write_port((usecs >> 24) & 0xff);
 	}
+//	if (usecs > 0) printf("%d\n", usecs);
 }
 
 static int h_getbyte(struct libxsvf_host *h)
 {
-	struct udata_s *u = h->user_data;
-	return fgetc(u->f);
+	return fgetc(f);
 }
 
 static int h_pulse_tck(struct libxsvf_host *h, int tms, int tdi, int tdo, int rmask, int sync)
 {
-	struct udata_s *u = h->user_data;
 	uint8_t data = 0;
 	if (tms) data |= 1;
 	if (tdi) data |= (1<<1);
-	write_port(u->portHandle, JTAG_PULSE_TCK);
-	write_port(u->portHandle, data);
-	int line_tdo = read_port(u->portHandle);
-	int rc = line_tdo >= 0 ? line_tdo : 0;
-
-	if (tdo >= 0 && line_tdo >= 0) {
-		if (tdo != line_tdo)
-			rc = -1;
-	}
-
-	if (u->verbose >= 4) {
-		fprintf(stderr, "[TMS:%d, TDI:%d, TDO_ARG:%d, TDO_LINE:%d, RMASK:%d, RC:%d]\n", tms, tdi, tdo, line_tdo, rmask, rc);
-	}
-
-	return rc;
-}
-
-
-static int h_pulse_tck_multi(struct libxsvf_host *h, unsigned char* data, unsigned char count)
-{
-	struct udata_s *u = h->user_data;
-	write_port(u->portHandle, JTAG_PULSE_TCK_MULTI);
-	write_port(u->portHandle, count);
-	int i;
-	for (i = 0; i < count; i++)
+	if (tdo >= 0)
 	{
-		write_port(u->portHandle, data[i]);
+		data |= (1<<2); // need check!
+		data |= (tdo << 3); // must be same!
 	}
-	if (u->verbose >= 4) {
-		fprintf(stderr, "[MULTI TCK: %d bits]\n", count);
-		fprintf(stderr, "[TMS:%d, TDI:%d, TDO:%d]\n", data[i]&1, (data[i]>>1)&1 ? (data[i]>>2)&1 : -1, (data[i]>>3)&1 ? (data[i]>>4)&1 : -1);
-	}
-	int result = read_port(u->portHandle);
-	if (!result) return -1;
+	
+	tck_data[tck_count] = data;
+	tck_count++;
+	if (tck_count == sizeof(tck_data))
+		flush_tck(h);
+	
 	return 0;
-}
-
-static void h_pulse_sck(struct libxsvf_host *h)
-{
-	struct udata_s *u = h->user_data;
-	if (u->verbose >= 4) {
-		fprintf(stderr, "[SCK]\n");
-	}
-	write_port(u->portHandle, JTAG_PULSE_SCK);
-}
-
-static void h_set_trst(struct libxsvf_host *h, int v)
-{
-	// Maybe I'll support it later
-	struct udata_s *u = h->user_data;
-	if (u->verbose >= 4) {
-		fprintf(stderr, "[TRST:%d]\n", v);
-	}
-}
-
-static int h_set_frequency(struct libxsvf_host *h, int v)
-{
-	fprintf(stderr, "WARNING: Setting JTAG clock frequency to %d ignored!\n", v);
-	return 0;
-}
-
-static void h_report_tapstate(struct libxsvf_host *h)
-{
-	struct udata_s *u = h->user_data;
-	if (u->verbose >= 3) {
-		fprintf(stderr, "[%s]\n", libxsvf_state2str(h->tap_state));
-	}
-}
-
-static void h_report_device(struct libxsvf_host *h, unsigned long idcode)
-{
-	printf("Device found: idcode=0x%08lx, revision=0x%01lx, part=0x%04lx, manufactor=0x%03lx\n", idcode,
-			(idcode >> 28) & 0xf, (idcode >> 12) & 0xffff, (idcode >> 1) & 0x7ff);
 }
 
 static void h_report_status(struct libxsvf_host *h, const char *message)
 {
-	struct udata_s *u = h->user_data;
-	if (u->verbose >= 2) {
+	if (verbose >= 2) {
 		fprintf(stderr, "[STATUS] %s\n", message);
 	}
 }
@@ -340,14 +376,11 @@ static void h_report_error(struct libxsvf_host *h, const char *file, int line, c
 
 static void *h_realloc(struct libxsvf_host *h, void *ptr, int size, enum libxsvf_mem which)
 {
-	struct udata_s *u = h->user_data;
-	if (u->verbose >= 3) {
+	if (verbose >= 3) {
 		fprintf(stderr, "[REALLOC:%s:%d]\n", libxsvf_mem2str(which), size);
 	}
 	return realloc(ptr, size);
 }
-
-static struct udata_s u;
 
 static struct libxsvf_host h = {
 	.udelay = h_udelay,
@@ -355,16 +388,14 @@ static struct libxsvf_host h = {
 	.shutdown = h_shutdown,
 	.getbyte = h_getbyte,
 	.pulse_tck = h_pulse_tck,
-	.pulse_tck_multi = h_pulse_tck_multi,
-	.pulse_sck = h_pulse_sck,
-	.set_trst = h_set_trst,
-	.set_frequency = h_set_frequency,
-	.report_tapstate = h_report_tapstate,
-	.report_device = h_report_device,
+	.pulse_sck = NULL,
+	.set_trst = NULL,
+	.set_frequency = NULL,
+	.report_tapstate = NULL,
+	.report_device = NULL,
 	.report_status = h_report_status,
 	.report_error = h_report_error,
 	.realloc = h_realloc,
-	.user_data = &u
 };
 
 const char *progname;
@@ -413,8 +444,10 @@ int main(int argc, char **argv)
 	int gotaction = 0;
 	int opt;
 
-	u.comPort[0] = 0;
-	u.portHandle = 0;
+	tck_count = 0;
+	verbose = 0;
+	comPort[0] = 0;
+	portHandle = 0;
 
 	progname = argc >= 1 ? argv[0] : "xvsftool";
 	while ((opt = getopt(argc, argv, "vp:x:s:c")) != -1)
@@ -423,22 +456,22 @@ int main(int argc, char **argv)
 		{
 		case 'v':
 			copyleft();
-			u.verbose++;
+			verbose++;
 			break;
 		case 'p':
-			strncpy(u.comPort, optarg, sizeof(u.comPort)-1);
-			u.comPort[sizeof(u.comPort)-1] = 0;
+			strncpy(comPort, optarg, sizeof(comPort)-1);
+			comPort[sizeof(comPort)-1] = 0;
 			break;
 		case 'x':
 		case 's':
 			gotaction = 1;
-			if (u.verbose)
+			if (verbose)
 				fprintf(stderr, "Playing %s file `%s'.\n", opt == 's' ? "SVF" : "XSVF", optarg);
 			if (!strcmp(optarg, "-"))
-				u.f = stdin;
+				f = stdin;
 			else
-				u.f = fopen(optarg, "rb");
-			if (u.f == NULL) {
+				f = fopen(optarg, "rb");
+			if (f == NULL) {
 				fprintf(stderr, "Can't open %s file `%s': %s\n", opt == 's' ? "SVF" : "XSVF", optarg, strerror(errno));
 				rc = 1;
 				break;
@@ -448,7 +481,7 @@ int main(int argc, char **argv)
 				rc = 1;
 			}
 			if (strcmp(optarg, "-"))
-				fclose(u.f);
+				fclose(f);
 			break;
 		case 'c':
 			gotaction = 1;
@@ -467,7 +500,7 @@ int main(int argc, char **argv)
 	if (!gotaction)
 		help();
 
-	if (u.verbose) {
+	if (verbose) {
 		if (rc == 0) {
 			fprintf(stderr, "Done!\n");
 		} else {

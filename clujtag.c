@@ -54,6 +54,7 @@ unsigned char tck_data[5096];
 int write_buffer_count = 0;
 unsigned char write_buffer[ACK_STEP+16];
 int byte_counter = 0;
+int scan_mode = 0;
 
 #ifdef WINDOWS
 static uint8_t read_port()
@@ -369,11 +370,30 @@ static int h_pulse_tck(struct libxsvf_host *h, int tms, int tdi, int tdo, int rm
 	
 	tck_data[tck_count] = data;
 	tck_count++;
-	if (tck_count == sizeof(tck_data))
+	if (tck_count == sizeof(tck_data) || (tdo < 0 && scan_mode))
 		flush_tck(h);
-
+	
+	if (tdo < 0 && scan_mode)
+	{
+		write_port(JTAG_TDO_REQUEST);
+		flush_data();
+		byte_counter = 0;
+		int res = read_port();
+		if (verbose >= 3) {
+			fprintf(stderr, "[TDO STATE: %d]\n", res);
+		}
+		return res;
+	}
+	
 	return 0;
 }
+
+static void h_report_device(struct libxsvf_host *h, unsigned long idcode)
+{
+	printf("Device found: idcode=0x%08lx, revision=0x%01lx, part=0x%04lx, manufactor=0x%03lx\n", idcode,
+			(idcode >> 28) & 0xf, (idcode >> 12) & 0xffff, (idcode >> 1) & 0x7ff);
+}
+
 
 static void h_report_status(struct libxsvf_host *h, const char *message)
 {
@@ -405,7 +425,7 @@ static struct libxsvf_host h = {
 	.set_trst = NULL,
 	.set_frequency = NULL,
 	.report_tapstate = NULL,
-	.report_device = NULL,
+	.report_device = h_report_device,
 	.report_status = h_report_status,
 	.report_error = h_report_error,
 	.realloc = h_realloc,
@@ -444,10 +464,10 @@ static void help()
 	fprintf(stderr, "\n");
 	fprintf(stderr, "   -x xsvf-file\n");
 	fprintf(stderr, "          Play the specified XSVF file\n");
-//	fprintf(stderr, "\n");
-//	fprintf(stderr, "   -c\n");
-//	fprintf(stderr, "          List devices in JTAG chain\n");
-//	fprintf(stderr, "\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "   -c\n");
+	fprintf(stderr, "          List devices in JTAG chain\n");
+	fprintf(stderr, "\n");
 	exit(1);
 }
 
@@ -481,18 +501,10 @@ int main(int argc, char **argv)
 		case 's':
 			gotaction = opt;
 			strncpy(filename, optarg, sizeof(filename));
+			filename[sizeof(filename)-1] = 0;
 			break;
 		case 'c':
-			gotaction = 1;
-			fprintf(stderr, "Scan feature is broken in this version, sorry\n");
-			rc = 1;
-/*
-			fprintf(stderr, "Scanning JTAG chain...\n");
-			if (libxsvf_play(&h, LIBXSVF_MODE_SCAN) < 0) {
-				fprintf(stderr, "Error while scanning JTAG chain.\n");
-				rc = 1;
-			}
-*/
+			gotaction = opt;
 			break;
 		default:
 			help();
@@ -500,31 +512,43 @@ int main(int argc, char **argv)
 		}
 	}
 	
-	if (gotaction)
+	switch (gotaction)
 	{
-		if (verbose)
-			fprintf(stderr, "Playing %s file `%s'.\n", opt == 's' ? "SVF" : "XSVF", filename);
-		if (!strcmp(filename, "-"))
-			f = stdin;
-		else
-			f = fopen(filename, "rb");
-		if (f == NULL) {
-			fprintf(stderr, "Can't open %s file `%s': %s\n", opt == 's' ? "SVF" : "XSVF", filename, strerror(errno));
+		case 'x':
+		case 's':
+			if (verbose)
+				fprintf(stderr, "Playing %s file `%s'.\n", opt == 's' ? "SVF" : "XSVF", filename);
+			if (!strcmp(filename, "-"))
+				f = stdin;
+			else
+				f = fopen(filename, "rb");
+			if (f == NULL) {
+				fprintf(stderr, "Can't open %s file `%s': %s\n", opt == 's' ? "SVF" : "XSVF", filename, strerror(errno));
 			rc = 1;
-		}
-		if (libxsvf_play(&h, gotaction == 's' ? LIBXSVF_MODE_SVF : LIBXSVF_MODE_XSVF) < 0) {
-			fprintf(stderr, "Error while playing %s file `%s'.\n", opt == 's' ? "SVF" : "XSVF", filename);
-			rc = 1;
-		}
-		if (strcmp(filename, "-"))
-			fclose(f);
-	} else {
-		help();
+			}
+			if (libxsvf_play(&h, gotaction == 's' ? LIBXSVF_MODE_SVF : LIBXSVF_MODE_XSVF) < 0) {
+				fprintf(stderr, "Error while playing %s file `%s'.\n", opt == 's' ? "SVF" : "XSVF", filename);
+				rc = 1;
+			}
+			if (strcmp(filename, "-"))
+				fclose(f);
+			break;
+			
+		case 'c':
+			scan_mode = 1;
+			if (libxsvf_play(&h, LIBXSVF_MODE_SCAN) < 0) {
+				fprintf(stderr, "Error while scanning JTAG chain.\n");
+				rc = 1;
+			}
+			break;
+			
+		default:
+			help();
+			break;
 	}
 
-	if (rc == 0) {
-		fprintf(stderr, "Done!\n");
-	} else {
+	if (rc)
+	{
 		fprintf(stderr, "Finished with errors!\n");
 	}
 

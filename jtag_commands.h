@@ -1,4 +1,4 @@
-#define JTAG_ACK_REQUEST 0xFD
+#define JTAG_TDO_REQUEST 0xFB
 
 #define JTAG_SETUP 0xFC
 

@@ -90,7 +90,12 @@ static uint8_t read_port()
 
 void check_result()
 {
-	if (!read_port())
+	uint8_t result = read_port();
+	if (verbose >= 4) {
+		fprintf(stderr, "[RESULT: %d]\n", result);
+	}
+	
+	if (!result)
 	{
 		fprintf(stderr, "JTAG error\r\n");
 		exit(2);
@@ -104,6 +109,10 @@ static void flush_data()
 	DWORD writed = 0;
 	if (WriteFile(portHandle, write_buffer, write_buffer_count, &writed, NULL) && (writed == write_buffer_count))
 	{
+		if (verbose >= 4) {
+			fprintf(stderr, "[WRITED: %d]\n", write_buffer_count);
+		}
+		write_buffer_count = 0;
 		return;
 	}
 	int error = GetLastError();
@@ -125,6 +134,10 @@ static void flush_data()
 	    perror("Write error");
 	    exit(1);
 	}
+	if (verbose >= 4) {
+		fprintf(stderr, "[WRITED: %d]\n", write_buffer_count);
+	}
+	write_buffer_count = 0;
 }
 #endif
 
@@ -135,7 +148,6 @@ static void write_port(uint8_t data)
 	if (byte_counter >= ACK_STEP)
 	{
 		flush_data();
-		write_buffer_count = 0;
 		check_result();
 		byte_counter = 0;
 	}
@@ -143,7 +155,7 @@ static void write_port(uint8_t data)
 
 static int h_setup(struct libxsvf_host *h)
 {
-	if (verbose >= 2) {
+	if (verbose >= 1) {
 		fprintf(stderr, "[SETUP]\n");
 		fflush(stderr);
 	}
@@ -236,7 +248,7 @@ static int h_setup(struct libxsvf_host *h)
 
 static int h_shutdown(struct libxsvf_host *h)
 {
-	if (verbose >= 2) {
+	if (verbose >= 1) {
 		fprintf(stderr, "[SHUTDOWN]\n");
 		fflush(stderr);
 	}
@@ -295,7 +307,7 @@ static int h_pulse_tck_multi(struct libxsvf_host *h, unsigned char* data, unsign
 		}
 	}
 			
-	if (verbose >= 4) {
+	if (verbose >= 3) {
 		fprintf(stderr, "[MULTI TCK: %d bits]\n", count);
 		fprintf(stderr, "[TMS:%d, TDI:%d, TDO:%d]\n", data[i]&1, (data[i]>>1)&1 ? (data[i]>>2)&1 : -1, (data[i]>>3)&1 ? (data[i]>>4)&1 : -1);
 	}
@@ -312,9 +324,8 @@ static void flush_tck(struct libxsvf_host *h)
 static void h_udelay(struct libxsvf_host *h, long usecs, int tms, long num_tck)
 {
 	flush_tck(h);
-	if (verbose >= 3) {
+	if (verbose >= 2) {
 		fprintf(stderr, "[DELAY:%ld, TMS:%d, NUM_TCK:%ld]\n", usecs, tms, num_tck);
-		fflush(stderr);
 	}
 
 	write_port(JTAG_PULSE_TCK_DELAY);
@@ -326,7 +337,6 @@ static void h_udelay(struct libxsvf_host *h, long usecs, int tms, long num_tck)
 		write_port((num_tck >> 16) & 0xff);
 		write_port((num_tck >> 24) & 0xff);
 	}
-//	if (num_tck > 0) printf("%d\n", num_tck);
 		
 	if (usecs > 0)
 	{
@@ -335,7 +345,6 @@ static void h_udelay(struct libxsvf_host *h, long usecs, int tms, long num_tck)
 		write_port((usecs >> 16) & 0xff);
 		write_port((usecs >> 24) & 0xff);
 	}
-//	if (usecs > 0) printf("%d\n", usecs);
 }
 
 static int h_getbyte(struct libxsvf_host *h)
@@ -345,6 +354,10 @@ static int h_getbyte(struct libxsvf_host *h)
 
 static int h_pulse_tck(struct libxsvf_host *h, int tms, int tdi, int tdo, int rmask, int sync)
 {
+	if (verbose >= 3) {
+		fprintf(stderr, "[PULSE TCK TMS: %d, TDI: %d, TDO: %d]\n", tms, tdi, tdo);
+	}
+
 	uint8_t data = 0;
 	if (tms) data |= 1;
 	if (tdi) data |= (1<<1);
@@ -358,13 +371,13 @@ static int h_pulse_tck(struct libxsvf_host *h, int tms, int tdi, int tdo, int rm
 	tck_count++;
 	if (tck_count == sizeof(tck_data))
 		flush_tck(h);
-	
+
 	return 0;
 }
 
 static void h_report_status(struct libxsvf_host *h, const char *message)
 {
-	if (verbose >= 2) {
+	if (verbose >= 1) {
 		fprintf(stderr, "[STATUS] %s\n", message);
 	}
 }
@@ -376,7 +389,7 @@ static void h_report_error(struct libxsvf_host *h, const char *file, int line, c
 
 static void *h_realloc(struct libxsvf_host *h, void *ptr, int size, enum libxsvf_mem which)
 {
-	if (verbose >= 3) {
+	if (verbose >= 2) {
 		fprintf(stderr, "[REALLOC:%s:%d]\n", libxsvf_mem2str(which), size);
 	}
 	return realloc(ptr, size);
@@ -431,15 +444,17 @@ static void help()
 	fprintf(stderr, "\n");
 	fprintf(stderr, "   -x xsvf-file\n");
 	fprintf(stderr, "          Play the specified XSVF file\n");
-	fprintf(stderr, "\n");
-	fprintf(stderr, "   -c\n");
-	fprintf(stderr, "          List devices in JTAG chain\n");
-	fprintf(stderr, "\n");
+//	fprintf(stderr, "\n");
+//	fprintf(stderr, "   -c\n");
+//	fprintf(stderr, "          List devices in JTAG chain\n");
+//	fprintf(stderr, "\n");
 	exit(1);
 }
 
 int main(int argc, char **argv)
 {
+	copyleft();
+	
 	int rc = 0;
 	int gotaction = 0;
 	int opt;
@@ -455,7 +470,6 @@ int main(int argc, char **argv)
 		switch (opt)
 		{
 		case 'v':
-			copyleft();
 			verbose++;
 			break;
 		case 'p':
@@ -485,11 +499,15 @@ int main(int argc, char **argv)
 			break;
 		case 'c':
 			gotaction = 1;
+			fprintf(stderr, "Scan feature is broken in this version, sorry\n");
+			rc = 1;
+/*
 			fprintf(stderr, "Scanning JTAG chain...\n");
 			if (libxsvf_play(&h, LIBXSVF_MODE_SCAN) < 0) {
 				fprintf(stderr, "Error while scanning JTAG chain.\n");
 				rc = 1;
 			}
+*/
 			break;
 		default:
 			help();
@@ -500,14 +518,11 @@ int main(int argc, char **argv)
 	if (!gotaction)
 		help();
 
-	if (verbose) {
-		if (rc == 0) {
-			fprintf(stderr, "Done!\n");
-		} else {
-			fprintf(stderr, "Finished with errors!\n");
-		}
+	if (rc == 0) {
+		fprintf(stderr, "Done!\n");
+	} else {
+		fprintf(stderr, "Finished with errors!\n");
 	}
-
 
 	exit(rc);
 }

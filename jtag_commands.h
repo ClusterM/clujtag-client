@@ -1,3 +1,5 @@
+#define JTAG_ACK_REQUEST 0xFD
+
 #define JTAG_SETUP 0xFC
 
 #define JTAG_PULSE_TCK_DELAY 0xFD

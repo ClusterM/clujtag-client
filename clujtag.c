@@ -463,6 +463,7 @@ int main(int argc, char **argv)
 	verbose = 0;
 	comPort[0] = 0;
 	portHandle = 0;
+	char filename[1024];
 
 	progname = argc >= 1 ? argv[0] : "xvsftool";
 	while ((opt = getopt(argc, argv, "vp:x:s:c")) != -1)
@@ -479,6 +480,7 @@ int main(int argc, char **argv)
 		case 'x':
 		case 's':
 			gotaction = opt;
+			strncpy(filename, optarg, sizeof(filename));
 			break;
 		case 'c':
 			gotaction = 1;
@@ -501,20 +503,20 @@ int main(int argc, char **argv)
 	if (gotaction)
 	{
 		if (verbose)
-			fprintf(stderr, "Playing %s file `%s'.\n", opt == 's' ? "SVF" : "XSVF", optarg);
-		if (!strcmp(optarg, "-"))
+			fprintf(stderr, "Playing %s file `%s'.\n", opt == 's' ? "SVF" : "XSVF", filename);
+		if (!strcmp(filename, "-"))
 			f = stdin;
 		else
-			f = fopen(optarg, "rb");
+			f = fopen(filename, "rb");
 		if (f == NULL) {
-			fprintf(stderr, "Can't open %s file `%s': %s\n", opt == 's' ? "SVF" : "XSVF", optarg, strerror(errno));
+			fprintf(stderr, "Can't open %s file `%s': %s\n", opt == 's' ? "SVF" : "XSVF", filename, strerror(errno));
 			rc = 1;
 		}
-		if (libxsvf_play(&h, opt == 's' ? LIBXSVF_MODE_SVF : LIBXSVF_MODE_XSVF) < 0) {
-			fprintf(stderr, "Error while playing %s file `%s'.\n", opt == 's' ? "SVF" : "XSVF", optarg);
+		if (libxsvf_play(&h, gotaction == 's' ? LIBXSVF_MODE_SVF : LIBXSVF_MODE_XSVF) < 0) {
+			fprintf(stderr, "Error while playing %s file `%s'.\n", opt == 's' ? "SVF" : "XSVF", filename);
 			rc = 1;
 		}
-		if (strcmp(optarg, "-"))
+		if (strcmp(filename, "-"))
 			fclose(f);
 	} else {
 		help();
